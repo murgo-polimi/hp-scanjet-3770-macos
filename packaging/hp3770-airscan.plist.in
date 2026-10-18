@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchAgent for hp3770-airscan: starts the AirScan server at login and
+     restarts it if it stops. Installed by "make install-service". -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@LABEL@</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@BINDIR@/hp3770-airscan</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <!-- a scan in progress finishes and parks the head before exiting -->
+  <key>ExitTimeOut</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGFILE@</string>
+  <key>StandardOutPath</key>
+  <string>@LOGFILE@</string>
+</dict>
+</plist>

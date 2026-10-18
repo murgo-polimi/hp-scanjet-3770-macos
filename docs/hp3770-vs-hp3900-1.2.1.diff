@@ -1,0 +1,1831 @@
+Changes of the hp3770 backend relative to sane-backends 1.2.1 backend/hp3900*.c
+(a/hp3770_X.c = upstream hp3900_X.c renamed, #include lines adjusted).
+New files not shown: backend/hp3770_legacy_tables.c (generated, make tables).
+
+diff -u -r a/hp3770.c b/hp3770.c
+--- a/hp3770.c	2026-10-19 01:06:31.576374255 +0200
++++ b/hp3770.c	2026-10-19 01:06:31.581916878 +0200
+@@ -1,4 +1,4 @@
+-/* HP Scanjet 3900 series - Stand-alone/SANE Backend controller
++/* HP ScanJet 3770 - SANE backend for macOS (port of the hp3900 backend)
+ 
+    Copyright (C) 2005-2008 Jonathan Bravo Lopez <jkdsoft@gmail.com>
+ 
+@@ -39,22 +39,17 @@
+    If you do not wish that, delete this exception notice.
+ */
+ 
+-
+-/* Backend info */
+-#define BACKEND_NAME    hp3900
+-#define BACKEND_VRSN    "0.12"
+-#define BACKEND_AUTHOR  "Jonathan Bravo Lopez (JKD)"
++/* This backend is the SANE hp3900 backend (sane-backends 1.2.1) with an
++   added HP ScanJet 3770 model (USB 03f0:2505). The 3770 uses the same
++   RTS8822L-01H controller as the HP ScanJet 3970 but a 1200 dpi CCD and
++   motor ("t6" profile); its parameters come from the original HP 3770 Linux
++   driver (see hp3770_legacy_tables.c and docs/porting-notes.md). */
++
++#define BACKEND_NAME    hp3770
++#define BACKEND_VRSN    "0.12-hp3770.1"
++#define BACKEND_AUTHOR  "Jonathan Bravo Lopez (JKD); HP3770 port"
+ #define BACKEND_EMAIL   "jkdsoft@gmail.com"
+-#define BACKEND_URL     "http://jkdsoftware.dyndns.org"
++#define BACKEND_URL     "http://www.sane-project.org"
+ #define BACKEND_LICENSE "General Public License (GPL)"
+ 
+-/* if you want to compile this one as a sane backend then comment next line */
+-/* Caution: Sources included in SANE project don't provide hp3900_stdalone.c */
+-
+-/*#define STANDALONE*/
+-
+-#ifdef STANDALONE
+-#include "hp3770_stdalone.c"
+-#else
+ #include "hp3770_sane.c"
+-#endif
+diff -u -r a/hp3770_config.c b/hp3770_config.c
+--- a/hp3770_config.c	2026-10-19 01:06:31.680374261 +0200
++++ b/hp3770_config.c	2026-10-19 01:06:31.686103685 +0200
+@@ -193,6 +193,21 @@
+ static int hpg3110_calibnegative(int option, int defvalue);
+ static int hpg3110_calibtransparent(int option, int defvalue);
+ 
++/* HP Scanjet 3770 (hp3770 port). The 3770 is electrically an HP3970 without
++   transparency adapter; it reuses the HP3970 configuration except for the
++   tables below, which come from the original HP 3770 driver. */
++static SANE_Int hp3770_timing_get(SANE_Int sensortype, SANE_Int tm, struct st_timing *reg);
++static SANE_Int *hp3770_motor(void);
++static SANE_Int hp3770_checkstable(SANE_Int lamp, struct st_checkstable *check);
++static int hp3770_calibreflective_get(int option, int defvalue);
++static SANE_Int hp3770_gainoffset(SANE_Int sensortype, struct st_gain_offset *myreg);
++static void hp3770_shading_cut(SANE_Int sensortype, SANE_Int depth, SANE_Int res, SANE_Int scantype, SANE_Int *red, SANE_Int *green, SANE_Int *blue);
++static void hp3770_vrefs_get(SANE_Int res, SANE_Int *ser, SANE_Int *ler);
++static SANE_Int hp3770_motormove_get(SANE_Int item, struct st_motormove *reg);
++static SANE_Int hp3770_scanmodes_get(SANE_Int usb, SANE_Int sm, struct st_scanmode *mymode);
++static int srt_hp3770_platform_get(int option, int defvalue);
++
++
+ /* ----- Implementation ----- */
+ 
+ /* DEPRECATED enumerations */
+@@ -357,6 +372,9 @@
+ 	MCLKIOC
+ };
+ 
++/* HP3770 tables generated from the original HP 3770 driver */
++#include "hp3770_legacy_tables.c"
++
+ static SANE_Int cfg_device_get(SANE_Int product, SANE_Int vendor)
+ {
+ 	struct st_myreg
+@@ -375,7 +393,8 @@
+ 		{  0x3f0, 0x2405, HP4070 }, /* HP Scanjet 4070 Photosmart */
+ 		{  0x3f0, 0x4105, HP4370 }, /* HP Scanjet 4370            */
+ 		{  0x3f0, 0x4205, HPG3010}, /* HP Scanjet G3010           */
+-		{  0x3f0, 0x4305, HPG3110}  /* HP Scanjet G3010           */
++		{  0x3f0, 0x4305, HPG3110}, /* HP Scanjet G3010           */
++		{  0x3f0, 0x2505, HP3770 }  /* HP Scanjet 3770            */
+ 	};
+ 
+ 	SANE_Int rst = -1; /* default */
+@@ -414,7 +433,8 @@
+ 		{ HP4070 , RTS8822L_01H  },
+ 		{ HP4370 , RTS8822L_02A  },
+ 		{ HPG3010, RTS8822L_02A  },
+-		{ HPG3110, RTS8822L_02A  }
++		{ HPG3110, RTS8822L_02A  },
++		{ HP3770 , RTS8822L_01H  }
+ 	};
+ 
+ 	SANE_Int rst = RTS8822L_01H; /* default */
+@@ -498,7 +518,8 @@
+ 			{ HP4070 , {4    , {0x04, 0x08, 0x02, 0x01,   -1,   -1}}},
+ 			{ HP4370 , {4    , {0x04, 0x08, 0x02, 0x01,   -1,   -1}}},
+ 			{ HPG3010, {4    , {0x04, 0x08, 0x02, 0x01,   -1,   -1}}},
+-			{ HPG3110, {4    , {0x04, 0x08, 0x02, 0x01,   -1,   -1}}}
++			{ HPG3110, {4    , {0x04, 0x08, 0x02, 0x01,   -1,   -1}}},
++			{ HP3770 , {4    , {0x04, 0x08, 0x02, 0x01,   -1,   -1}}}
+ 		};
+ 
+ 		SANE_Int a;
+@@ -544,7 +565,8 @@
+ 			{ HP4070, {1     ,    1,     0}},
+ 			{ HP4370, {1     ,    1,     0}},
+ 			{HPG3010, {1     ,    1,     0}},
+-			{HPG3110, {1     ,    1,     0}}
++			{HPG3110, {1     ,    1,     0}},
++			{ HP3770, {1     ,    1,     0}}
+ 		};
+ 
+ 		SANE_Int a;
+@@ -596,7 +618,9 @@
+ 			{ HP4070, {MT_OUTPUTSTATE, 2400,   30,   800,        1,        0,        0,   TRUE}},
+ 			{ HP4370, {MT_OUTPUTSTATE, 2400,   30,   800,        1,        0,        0,   TRUE}},
+ 			{HPG3010, {MT_OUTPUTSTATE, 2400,   30,   800,        1,        0,        0,   TRUE}},
+-			{HPG3110, {MT_OUTPUTSTATE, 2400,   30,   800,        1,        0,        0,   TRUE}}
++			{HPG3110, {MT_OUTPUTSTATE, 2400,   30,   800,        1,        0,        0,   TRUE}},
++			/* HP3770: t6 profile of the 3770 driver ([PlatForm] MotorResolution, [MoveMotorSetting]) */
++			{ HP3770, {MT_OUTPUTSTATE, HP3770_MOTOR_RESOLUTION, 30, HP3770_BASESPEED_PPS, HP3770_BASESPEED_MOVE, HP3770_HIGHSPEED_MOVE, HP3770_PARKHOME_MOVE, HP3770_CHANGE_MOTOR_CURRENT}}
+ 		};
+ 
+ 		SANE_Int a;
+@@ -646,7 +670,9 @@
+ 			{ HP4070, {CCD_SENSOR, TCD2952, 2400      , {CL_RED , CL_GREEN, CL_BLUE}, {CL_RED  , 0}, {CL_RED , CL_GREEN, CL_BLUE}, 24       , 4           }},
+ 			{ HP4370, {CCD_SENSOR, TCD2958, 4800      , {CL_RED , CL_GREEN, CL_BLUE}, {CL_RED  , 0}, {CL_RED , CL_GREEN, CL_BLUE}, 128      , 6           }},
+ 			{HPG3010, {CCD_SENSOR, TCD2958, 4800      , {CL_RED , CL_GREEN, CL_BLUE}, {CL_RED  , 0}, {CL_RED , CL_GREEN, CL_BLUE}, 128      , 6           }},
+-			{HPG3110, {CCD_SENSOR, TCD2958, 4800      , {CL_RED , CL_GREEN, CL_BLUE}, {CL_RED  , 0}, {CL_RED , CL_GREEN, CL_BLUE}, 128      , 6           }}
++			{HPG3110, {CCD_SENSOR, TCD2958, 4800      , {CL_RED , CL_GREEN, CL_BLUE}, {CL_RED  , 0}, {CL_RED , CL_GREEN, CL_BLUE}, 128      , 6           }},
++			/* HP3770: 1200 dpi "t6" CCD selected by the 3770 driver (FitCalibrate CCDType=2) */
++			{ HP3770, {CCD_SENSOR,      -1, HP3770_SENSOR_RESOLUTION, {CL_RED , CL_GREEN, CL_BLUE}, {CL_RED  , 0}, {CL_RED , CL_GREEN, CL_BLUE}, HP3770_LINE_DISTANCE, HP3770_EVENODD_DISTANCE}}
+ 		};
+ 
+ 		SANE_Int a;
+@@ -756,6 +782,14 @@
+ 		case HPG2710:
+ 			hp3800_refvoltages(RTS_Debug->usbtype, sensortype, vrts, vrms, vrbs);
+ 			break;
++		case HP3770:
++			if ((vrts != NULL) && (vrms != NULL) && (vrbs != NULL))
++			{
++				*vrts = HP3770_VRTS;
++				*vrms = HP3770_VRMS;
++				*vrbs = HP3770_VRBS;
++			}
++			break;
+ 		default:
+ 			/* at this momment all analyzed scanners have the same values */
+ 			hp3970_refvoltages(RTS_Debug->usbtype, sensortype, vrts, vrms, vrbs);
+@@ -1013,7 +1047,8 @@
+ 		{ HP4370 , {{   0,   220,   0,    300}, {  90,    45,   0,     85}, {  90,    45,   0,    100}}},
+ 		{ UA4900 , {{   0,   220,   0,    300}, {  88,    42,   0,     83}, {  88,    42,   0,     83}}},
+ 		{HPG3010 , {{   0,   220,   0,    300}, {  90,    45,   0,     85}, {  89,    45,   0,    100}}},
+-		{HPG3110 , {{   0,   220,   0,    300}, {  92,    28,   0,    190}, {  85,    44,   0,    190}}}
++		{HPG3110 , {{   0,   220,   0,    300}, {  92,    28,   0,    190}, {  85,    44,   0,    190}}},
++		{ HP3770 , {{   0,   220,   0,    300}, {  88,    42,   0,     83}, {  88,    42,   0,     83}}}
+ 	};
+ 
+ 	if (constrain != NULL)
+@@ -1098,7 +1133,8 @@
+ 			{ HP4070 , {REF_TAKEFROMSCANNER,  88, 717, 600       , 40}},
+ 			{ HP4370 , {REF_TAKEFROMSCANNER,  88, 717, 600       , 40}},
+ 			{HPG3010 , {REF_TAKEFROMSCANNER,  88, 717, 600       , 40}},
+-			{HPG3110 , {REF_TAKEFROMSCANNER,  88, 717, 600       , 40}}
++			{HPG3110 , {REF_TAKEFROMSCANNER,  88, 717, 600       , 40}},
++			{ HP3770 , {REF_TAKEFROMSCANNER, HP3770_AUTOREF_SER, HP3770_AUTOREF_LER, 600, HP3770_AUTOREF_BOUNDARY}}
+ 		};
+ 
+ 		SANE_Int a;
+@@ -1112,6 +1148,33 @@
+ 				break;
+ 			}
+ 		}
++
++		if (RTS_Debug->dev_model == HP3770)
++		{
++			/* fine-tuning of the image origin without rebuilding:
++			   HP3770_AUTOREF_X / HP3770_AUTOREF_Y (2400 dpi units) */
++			const char *x = getenv("HP3770_AUTOREF_X");
++			const char *y = getenv("HP3770_AUTOREF_Y");
++
++			/* accepted only near the driver defaults (88, 650): a typo
++			   must not turn into a huge motor start position */
++			if (x != NULL)
++			{
++				long v = strtol(x, NULL, 0);
++				if ((v >= 0) && (v <= 400))
++					reg->offset_x = (SANE_Int) v;
++				else
++					DBG(DBG_ERR, "- hp3770: HP3770_AUTOREF_X=%s ignored (allowed 0..400)\n", x);
++			}
++			if (y != NULL)
++			{
++				long v = strtol(y, NULL, 0);
++				if ((v >= 300) && (v <= 1000))
++					reg->offset_y = (SANE_Int) v;
++				else
++					DBG(DBG_ERR, "- hp3770: HP3770_AUTOREF_Y=%s ignored (allowed 300..1000)\n", y);
++			}
++		}
+ 	}
+ }
+ 
+@@ -1495,6 +1558,10 @@
+ 			rst = hp4370_gainoffset(RTS_Debug->usbtype, reg);
+ 			break;
+ 
++		case HP3770:
++			rst = hp3770_gainoffset(sensortype, reg);
++			break;
++
+ 		default:
+ 			rst = hp3970_gainoffset(RTS_Debug->usbtype, sensortype, reg);
+ 			break;
+@@ -1662,6 +1729,10 @@
+ 			rst = hp4370_checkstable(lamp, check);
+ 			break;
+ 
++		case HP3770:
++			rst = hp3770_checkstable(lamp, check);
++			break;
++
+ 		default:
+ 			rst = hp3970_checkstable(lamp, check);
+ 			break;
+@@ -1829,6 +1900,10 @@
+ 			rst = hp4370_fixedpwm(scantype, RTS_Debug->usbtype);
+ 			break;
+ 
++		case HP3770:
++			rst = HP3770_FIXED_PWM;	/* T6_USB2FixedPwm */
++			break;
++
+ 		default:
+ 			rst = hp3970_fixedpwm(scantype, RTS_Debug->usbtype, sensortype);
+ 			break;
+@@ -1854,6 +1929,10 @@
+ 			hp4370_vrefs(res, ser, ler);
+ 			break;
+ 
++		case HP3770:
++			hp3770_vrefs_get(res, ser, ler);
++			break;
++
+ 		default:
+ 			hp3970_vrefs(RTS_Debug->usbtype, sensortype, res, ser, ler);
+ 			break;
+@@ -2022,6 +2101,19 @@
+ 			rst = hp3800_motormove(item, reg);
+ 			break;
+ 
++		case HP3770:
++			/* Head moves (park, relocate) use the HP3970 values: system clock
++			   2, CTPC 6431, half steps, MotorCurve2 (identical in the 3770
++			   driver). They parked this scanner correctly on its first hardware
++			   run. The t6 [MotorMove1] values (clock 4, MotorCurve9) give twice
++			   the step rate with hp3900's Motor_Move, which fixes the pixel
++			   clock divider at 12: the head stalled and whistled. */
++			if (getenv("HP3770_T6_MOTORMOVE") != NULL)
++				rst = hp3770_motormove_get(item, reg);
++			else
++				rst = hp3970_motormove(USB20, CCD_SENSOR, item, reg);
++			break;
++
+ 		default:
+ 			rst = hp3970_motormove(RTS_Debug->usbtype, sensortype, item, reg);
+ 			break;
+@@ -2159,6 +2251,10 @@
+ 			rst = hp4370_scanmodes(RTS_Debug->usbtype, sm, mymode);
+ 			break;
+ 
++		case HP3770:
++			rst = hp3770_scanmodes_get(RTS_Debug->usbtype, sm, mymode);
++			break;
++
+ 		default: /* hp3970 hp4070 */
+ 			rst = hp3970_scanmodes(RTS_Debug->usbtype, sensortype, sm, mymode);
+ 			break;
+@@ -3573,6 +3669,10 @@
+ 			hp4370_shading_cut(depth, res, scantype, red, green, blue);
+ 			break;
+ 
++		case HP3770:
++			hp3770_shading_cut(sensortype, depth, res, scantype, red, green, blue);
++			break;
++
+ 		default:
+ 			/* hp3970 and hp4070 */
+ 			hp3970_shading_cut(RTS_Debug->usbtype, sensortype, depth, res, scantype, red, green, blue);
+@@ -3802,6 +3902,10 @@
+ 			rst = hp3800_timing_get(tm, reg);
+ 			break;
+ 
++		case HP3770:
++			rst = hp3770_timing_get(sensortype, tm, reg);
++			break;
++
+ 		default:
+ 			/* hp3970 and hp4070 */
+ 			rst = hp3970_timing_get(sensortype, tm, reg);
+@@ -4205,6 +4309,10 @@
+ 			rst = hp4370_motor();
+ 			break;
+ 
++		case HP3770:
++			rst = hp3770_motor();
++			break;
++
+ 		default:
+ 			rst = hp3970_motor();
+ 			break;
+@@ -4594,6 +4702,7 @@
+ 		case HPG3010:
+ 		case HPG3110:
+ 		case HP4370: rst = hp4370_calibreflective(option, defvalue); break;
++		case HP3770: rst = hp3770_calibreflective_get(option, defvalue); break;
+ 		default    : rst = hp3970_calibreflective(option, defvalue); break;
+ 	}
+ 
+@@ -6013,6 +6122,7 @@
+ 				case HPG3010:
+ 				case HPG3110:
+ 				case HP4370: rst = srt_hp4370_platform_get(option, defvalue); break;
++				case HP3770: rst = srt_hp3770_platform_get(option, defvalue); break;
+ 				default    : rst = srt_hp3970_platform_get(option, defvalue); break;
+ 			}
+ 			break;
+@@ -6040,3 +6150,174 @@
+ 
+ 	return rst;
+ }
++
++/** SEC: HP Scanjet 3770 ---------- */
++
++static SANE_Int hp3770_timing_get(SANE_Int sensortype, SANE_Int tm, struct st_timing *reg)
++{
++	/* timing tables of the original 3770 driver (t6_TimingN, index =
++	   TimingN - 1). The 3770 driver always uses the t6 profile, whatever
++	   the CCD detection reports. */
++	SANE_Int rst = ERROR;
++
++	(void) sensortype;
++
++	if ((reg != NULL) && (tm >= 0) && (tm < 12))
++	{
++		memcpy(reg, &hp3770_timing[tm], sizeof(struct st_timing));
++		rst = OK;
++	}
++
++	return rst;
++}
++
++static SANE_Int *hp3770_motor()
++{
++	SANE_Int *rst = (SANE_Int *)malloc(sizeof(hp3770_motorcurves));
++
++	if (rst != NULL)
++		memcpy(rst, hp3770_motorcurves, sizeof(hp3770_motorcurves));
++
++	return rst;
++}
++
++static SANE_Int hp3770_checkstable(SANE_Int lamp, struct st_checkstable *check)
++{
++	SANE_Int rst = ERROR;
++
++	if (check != NULL)
++	{
++		const struct st_checkstable *value = NULL;
++
++		switch (lamp)
++		{
++			case 0: value = &hp3770_checkstable_preview; break;
++			case FLB_LAMP: value = &hp3770_checkstable_flb; break;
++			case TMA_LAMP: value = &hp3770_checkstable_tma; break;
++		}
++
++		if (value != NULL)
++		{
++			memcpy(check, value, sizeof(struct st_checkstable));
++			rst = OK;
++		}
++	}
++
++	return rst;
++}
++
++static int hp3770_calibreflective_get(int option, int defvalue)
++{
++	/* HP3770_HP3970_CALIBRATION=1 selects the HP3970 starting values instead
++	   of the 3770 driver ones (troubleshooting aid) */
++	const char *fallback = getenv("HP3770_HP3970_CALIBRATION");
++
++	if ((fallback != NULL) && (fallback[0] == '1'))
++		return hp3970_calibreflective(option, defvalue);
++
++	return hp3770_calibreflective(option, defvalue);
++}
++
++static void hp3770_shading_cut(SANE_Int sensortype, SANE_Int depth, SANE_Int res, SANE_Int scantype, SANE_Int *red, SANE_Int *green, SANE_Int *blue)
++{
++	/* reflective Toshiba/USB2 values come from the 3770 driver; everything
++	   else (transparency, negative, Sony, USB 1.1) keeps the HP3970 table */
++	hp3970_shading_cut(RTS_Debug->usbtype, sensortype, depth, res, scantype, red, green, blue);
++
++	if ((scantype == ST_NORMAL) && (sensortype == CCD_SENSOR) && (RTS_Debug->usbtype == USB20))
++	{
++		SANE_Int a, count = sizeof(hp3770_reflective_cut) / sizeof(hp3770_reflective_cut[0]);
++		SANE_Int myres;
++
++		if (res <= 100) myres = 100;
++		else if (res <= 200) myres = 200;
++		else if (res <= 300) myres = 300;
++		else if (res <= 600) myres = 600;
++		else if (res <= 1200) myres = 1200;
++		else myres = 2400;
++
++		for (a = 0; a < count; a++)
++		{
++			if ((hp3770_reflective_cut[a].depth == ((depth > 8) ? 16 : 8)) && (hp3770_reflective_cut[a].res == myres))
++			{
++				*red   = hp3770_reflective_cut[a].cut[CL_RED];
++				*green = hp3770_reflective_cut[a].cut[CL_GREEN];
++				*blue  = hp3770_reflective_cut[a].cut[CL_BLUE];
++				break;
++			}
++		}
++	}
++}
++
++static SANE_Int hp3770_gainoffset(SANE_Int sensortype, struct st_gain_offset *myreg)
++{
++	/* hp3970_gainoffset() never matches (its loop tests "count < 4" with
++	   count == 4), so the HP3970 path leaves every default at zero. With
++	   calibration disabled the final scan then runs at PAG 0 while the
++	   software white shading was measured at PAG 3, which makes images about
++	   four times too dark (first 3770 hardware scan). Use the 3770 driver's
++	   defaults instead. */
++	(void) sensortype;
++
++	if (myreg == NULL)
++		return ERROR;
++
++	memcpy(myreg, &hp3770_gain_offset, sizeof(struct st_gain_offset));
++	return OK;
++}
++
++static void hp3770_vrefs_get(SANE_Int res, SANE_Int *ser, SANE_Int *ler)
++{
++	/* [SCAN_PARAM] SER_n/LER_n of the t6 profile */
++	SANE_Int a, count = sizeof(hp3770_vrefs) / sizeof(hp3770_vrefs[0]);
++
++	if ((ser == NULL) || (ler == NULL))
++		return;
++
++	*ser = *ler = 0;
++	for (a = 0; a < count; a++)
++		if (hp3770_vrefs[a][0] == res)
++		{
++			*ser = hp3770_vrefs[a][1];
++			*ler = hp3770_vrefs[a][2];
++			break;
++		}
++}
++
++static SANE_Int hp3770_motormove_get(SANE_Int item, struct st_motormove *reg)
++{
++	SANE_Int count = sizeof(hp3770_motormoves) / sizeof(hp3770_motormoves[0]);
++
++	if ((reg == NULL) || (item < 0) || (item >= count))
++		return ERROR;
++
++	memcpy(reg, &hp3770_motormoves[item], sizeof(struct st_motormove));
++	return OK;
++}
++
++static SANE_Int hp3770_scanmodes_get(SANE_Int usb, SANE_Int sm, struct st_scanmode *mymode)
++{
++	/* the 3770 driver only has USB 2 reflective modes; the same table is
++	   used on a USB 1.1 port */
++	SANE_Int count = sizeof(hp3770_scanmodes) / sizeof(hp3770_scanmodes[0]);
++
++	(void) usb;
++
++	if ((mymode == NULL) || (sm < 0) || (sm >= count))
++		return ERROR;
++
++	memcpy(mymode, &hp3770_scanmodes[sm], sizeof(struct st_scanmode));
++	return OK;
++}
++
++static int srt_hp3770_platform_get(int option, int defvalue)
++{
++	switch (option)
++	{
++		case BINARYTHRESHOLDH: return HP3770_BINARY_THRESHOLD_H;
++		case BINARYTHRESHOLDL: return HP3770_BINARY_THRESHOLD_L;
++		case CLOSETIME: return 1214636;
++	}
++
++	return defvalue;
++}
+diff -u -r a/hp3770_rts8822.c b/hp3770_rts8822.c
+--- a/hp3770_rts8822.c	2026-10-19 01:06:31.675536782 +0200
++++ b/hp3770_rts8822.c	2026-10-19 01:06:31.680338608 +0200
+@@ -74,6 +74,17 @@
+ #include "hp3770_config.c"
+ #include "hp3770_usb.c"
+ 
++/* HP3770: distance of the head from home in motor half-steps, counted from
++   the jobs this driver starts (-1 = unknown). Used to avoid very short parks:
++   on the real scanner a park started ~3 mm from home never ended (second
++   hardware run), while parks from 10 mm and more worked. */
++static SANE_Int hp3770_head_pos = -1;
++/* HP3770: line period (s) and vertical resolution of the last image job */
++static double hp3770_line_time = 0.0;
++static SANE_Int hp3770_line_res = 0;
++static SANE_Byte hp3770_job_regs[RT_BUFFER_LEN];
++#define HP3770_MIN_PARK_DISTANCE 700
++
+ /*-------------------- Exported function headers --------------------*/
+ 
+ #ifdef developing
+@@ -163,6 +174,7 @@
+ /* Chipset management useful commands*/
+ static SANE_Int RTS_USBType (struct st_device *dev);
+ static SANE_Byte RTS_Sensor_Type (USB_Handle usb_handle);
++static SANE_Int hp3770_sensor_type (USB_Handle usb_handle);
+ static void RTS_DebugInit (void);
+ static SANE_Int RTS_Enable_CCD (struct st_device *dev, SANE_Byte * Regs,
+ 				SANE_Int channels);
+@@ -741,9 +753,21 @@
+   SANE_Int rst = ERROR;
+ 
+   if (buffer != NULL)
+-    rst =
+-      Write_Buffer (usb_handle, 0xe800, buffer,
+-		    RT_BUFFER_LEN * sizeof (SANE_Byte));
++    {
++      /* HP3770: a CLAMPE of all ones in the t6 timing tables means "clamp
++         until the end of the line": HP's driver always programs the line
++         period (0x30) there; hp3900 would leave 0xffffff */
++      if ((RTS_Debug != NULL) && (RTS_Debug->dev_model == HP3770)
++	  && (data_lsb_get (&buffer[0x8d], 3) == 0xffffff))
++	data_lsb_set (&buffer[0x8d], data_lsb_get (&buffer[0x30], 3), 3);
++
++      if ((RTS_Debug != NULL) && (RTS_Debug->dev_model == HP3770))
++	memcpy (hp3770_job_regs, buffer, RT_BUFFER_LEN);
++
++      rst =
++	Write_Buffer (usb_handle, 0xe800, buffer,
++		      RT_BUFFER_LEN * sizeof (SANE_Byte));
++    }
+ 
+   return rst;
+ }
+@@ -1057,6 +1081,7 @@
+ 		      mtc->curve_count--;
+ 		    }
+ 		}
++	      free (mtc->curve);	/* HP3770: the pointer array leaked */
+ 	      free (mtc);
+ 	    }
+ 	  *mtc_count -= 1;
+@@ -1066,6 +1091,65 @@
+     }
+ }
+ 
++/* HP3770: last value of status byte 0xf910 (for --info), -1 until read.
++   The original driver ignores it for table selection: FitCalibrate
++   [PLATFORM] CCDType=2 forces the "t6" profile (1200 dpi CCD). */
++static SANE_Int hp3770_ccd_status = -1;
++
++/* HP3770: CRVS of the profile (low 5 bits of 0xe810), -1 until set */
++static SANE_Int hp3770_crvs = -1;
++
++static void hp3770_motor_stop (struct st_device *dev);
++
++
++/* TRUE when the opened device is a real 3770 (03f0:2505), whatever model
++   profile is selected with opt_model: keeps the read-only CCD detection and
++   the flatbed-only source list when comparing against the HP3970 profile. */
++static SANE_Int hp3770_hardware = FALSE;
++
++/* HP3770_LAMP_PWM: unset -> -1, "off" -> -2 (no PWM dimming), 0..63 -> duty */
++static SANE_Int
++hp3770_lamp_pwm_override (void)
++{
++  static SANE_Int value = -3;
++
++  if (value == -3)
++    {
++      const char *env = getenv ("HP3770_LAMP_PWM");
++
++      value = -1;
++      if (env != NULL)
++	{
++	  if (strcmp (env, "off") == 0)
++	    value = -2;
++	  else
++	    {
++	      long v = strtol (env, NULL, 0);
++	      if ((v >= 0) && (v <= 63))
++		value = (SANE_Int) v;
++	    }
++	}
++    }
++
++  return value;
++}
++
++static SANE_Int
++hp3770_sensor_type (USB_Handle usb_handle)
++{
++  SANE_Byte status = 0;
++
++  DBG (DBG_FNC, "+ hp3770_sensor_type:\n");
++
++  if (Read_Byte (usb_handle, 0xf910, &status) == OK)
++    hp3770_ccd_status = status;
++
++  DBG (DBG_FNC, "- hp3770_sensor_type: status=0x%02x -> t6 CCD profile (as the 3770 driver)\n",
++       _B0 (status));
++
++  return CCD_SENSOR;
++}
++
+ static SANE_Byte
+ RTS_Sensor_Type (USB_Handle usb_handle)
+ {
+@@ -1288,7 +1372,10 @@
+   /* load sensor main configuration */
+   Load_Sensor (dev);
+ 
+-  if (dev->sensorcfg->type == -1)
++  if ((RTS_Debug->dev_model == HP3770) || (hp3770_hardware == TRUE))
++    /* HP3770: CCD variant comes from status byte 0xf910 (no GPIO writes) */
++    dev->sensorcfg->type = hp3770_sensor_type (dev->usb_handle);
++  else if (dev->sensorcfg->type == -1)
+     /* get sensor from gpio */
+     dev->sensorcfg->type = RTS_Sensor_Type (dev->usb_handle);
+ 
+@@ -2533,6 +2620,14 @@
+   SANE_Byte *Regs;
+   SANE_Int rst;
+ 
++  /* HP3770 diagnostics: HP3770_LAMP_PWM=0..63 forces the lamp duty cycle */
++  if (hp3770_lamp_pwm_override () >= 0)
++    {
++      DBG (DBG_FNC, " -> HP3770_LAMP_PWM: duty cycle %i instead of %i\n",
++	   hp3770_lamp_pwm_override (), duty_cycle);
++      duty_cycle = hp3770_lamp_pwm_override ();
++    }
++
+   DBG (DBG_FNC, "+ Lamp_PWM_DutyCycle_Set(duty_cycle=%i):\n", duty_cycle);
+ 
+   rst = ERROR;
+@@ -2628,6 +2723,30 @@
+ 	      mymotor.systemclock = default_gain_offset->edcg2[1];	/*? */
+ 	    }
+ 
++	  /* HP3770: never start a park closer than HP3770_MIN_PARK_DISTANCE
++	     half-steps to home; move forward slowly first (400 steps/s, no
++	     acceleration needed) */
++	  if ((RTS_Debug->dev_model == HP3770) && (hp3770_head_pos >= 0)
++	      && (hp3770_head_pos < HP3770_MIN_PARK_DISTANCE))
++	    {
++	      struct st_motormove nudge;
++	      struct st_motorpos npos;
++
++	      nudge.systemclock = 0x02;
++	      nudge.ctpc = 400;	/* 18 MHz / 12 / 400 = 3750 clocks per step: 400 steps/s */
++	      nudge.scanmotorsteptype = STT_HALF;
++	      nudge.motorcurve = -1;
++
++	      npos.options = MTR_ENABLED | MTR_FORWARD;
++	      npos.v12e448 = 0x00;
++	      npos.v12e44c = 0x00;
++	      npos.coord_y = (HP3770_MIN_PARK_DISTANCE - hp3770_head_pos) / 2 + 1;
++
++	      DBG (DBG_FNC, "->   Head_ParkHome: head only ~%i half-steps from home, moving forward first\n",
++		   hp3770_head_pos);
++	      Motor_Move (dev, Regs, &nudge, &npos);
++	    }
++
+ 	  mtrpos.options = MTR_ENABLED | MTR_BACKWARD;
+ 	  mtrpos.v12e448 = 0x01;
+ 	  mtrpos.v12e44c = 0x00;
+@@ -2637,7 +2756,19 @@
+ 
+ 	  /* Should we wait? */
+ 	  if (bWait != FALSE)
+-	    rst = RTS_WaitScanEnd (dev, 15000);
++	    {
++	      rst = RTS_WaitScanEnd (dev, 15000);
++
++	      /* HP3770: a park that has not finished after 15 s means the head
++	         is stuck; stop the motor instead of leaving it energised */
++	      if ((RTS_Debug->dev_model == HP3770) && (RTS_IsExecuting (dev, Regs) == TRUE))
++		{
++		  hp3770_motor_stop (dev);
++		  DBG (DBG_ERR, "- Head_ParkHome: head did not reach home within 15 s, motor stopped\n");
++		  hp3770_head_pos = -1;
++		  rst = ERROR;
++		}
++	    }
+ 
+ 	  dev->status->parkhome = FALSE;
+ 	}
+@@ -2650,6 +2781,16 @@
+   return rst;
+ }
+ 
++/* HP3770: clear the execution bit of 0xe800 to stop a running job */
++static void
++hp3770_motor_stop (struct st_device *dev)
++{
++  SANE_Byte data = 0;
++
++  if (Read_Byte (dev->usb_handle, 0xe800, &data) == OK)
++    Write_Byte (dev->usb_handle, 0xe800, data & 0x7f);
++}
++
+ static SANE_Int
+ Motor_Move (struct st_device *dev, SANE_Byte * Regs,
+ 	    struct st_motormove *mymotor, struct st_motorpos *mtrpos)
+@@ -2796,7 +2937,9 @@
+ 	  /* Setting some motor step */
+ 	  SANE_Int some_step;
+ 
+-	  switch (Regs[0x00] & 0x0f)
++	  /* HP3770: use the move's own system clock (upstream reads the
++	     caller's register image, so the speed depended on the last job) */
++	  switch (((RTS_Debug->dev_model == HP3770) ? cpRegs[0x00] : Regs[0x00]) & 0x0f)
+ 	    {
+ 	    case 0x00:
+ 	      some_step = 0x00895440;
+@@ -2864,10 +3007,25 @@
+       if (data == OK)
+ 	RTS_Execute (dev);
+ 
+-      /* wait 10 seconds */
+-      RTS_WaitScanEnd (dev, 10000);
++      if (RTS_Debug->dev_model == HP3770)
++	{
++	  /* HP3770: one 15 s wait, then stop a job that is still running
++	     (upstream waits 10 + 20 s with the motor energised) */
++	  rst = (data != OK) ? v12dcf8 : RTS_WaitScanEnd (dev, 15000);
++	  if (RTS_IsExecuting (dev, cpRegs) == TRUE)
++	    {
++	      hp3770_motor_stop (dev);
++	      DBG (DBG_ERR, "- Motor_Move: move still running after 15 s, motor stopped\n");
++	      hp3770_head_pos = -1;
++	    }
++	}
++      else
++	{
++	  /* wait 10 seconds */
++	  RTS_WaitScanEnd (dev, 10000);
+ 
+-      rst = (data != OK) ? v12dcf8 : RTS_WaitScanEnd (dev, 20000);
++	  rst = (data != OK) ? v12dcf8 : RTS_WaitScanEnd (dev, 20000);
++	}
+ 
+       free (cpRegs);
+     }
+@@ -2931,6 +3089,7 @@
+       dev->mtrsetting = Motor_Curve_Parse (&dev->mtrsetting_count, mtc);
+       if (dev->mtrsetting != NULL)
+ 	rst = OK;
++      free (mtc);		/* HP3770: parsed into copies, was leaked */
+     }
+ 
+   if (rst != ERROR)
+@@ -3388,7 +3547,20 @@
+     mybwriten = ((mybwriten - 1) | 0xfffffff0) + 1;
+ 
+   if (mybwriten != 0)
+-    bwriten = (((bwriten & 0xffff) >> 0x04) + 1) << 0x04;
++    {
++      /* the DMA transfer is padded to 16 bytes: grow the buffer so the
++         padding is zeroes instead of a read past the allocation
++         (hp3770 port fix; upstream hp3900 over-reads here) */
++      SANE_Int padded = (((bwriten & 0xffff) >> 0x04) + 1) << 0x04;
++      SANE_Byte *grown = (SANE_Byte *) realloc (steps, padded);
++
++      if (grown != NULL)
++	{
++	  memset (grown + bwriten, 0, padded - bwriten);
++	  steps = grown;
++	  bwriten = padded;
++	}
++    }
+   bwriten = bwriten & 0xffff;
+ 
+   /* display table */
+@@ -3447,6 +3619,10 @@
+   SANE_Byte a, b;
+   SANE_Int rst = ERROR;
+ 
++  /* HP3770 diagnostics: HP3770_LAMP_PWM=off keeps the lamp at full power */
++  if (hp3770_lamp_pwm_override () == -2)
++    enable = 0;
++
+   DBG (DBG_FNC, "+ Lamp_PWM_use(enable=%i):\n", enable);
+ 
+   if (Read_Byte (dev->usb_handle, 0xe948, &a) == OK)
+@@ -3585,6 +3761,7 @@
+ 
+   /* set crvs */
+   data_bitset (&dev->init_regs[0x10], 0x1f, get_value (SCAN_PARAM, CRVS, 7, usbfile));	   /*---xxxxx*/
++  hp3770_crvs = dev->init_regs[0x10] & 0x1f;
+ 
+   /* set reference voltages */
+   RTS_Setup_RefVoltages (dev, dev->init_regs);
+@@ -3638,7 +3815,7 @@
+   dev->init_regs[0x29] = 0x24;
+   dev->init_regs[0x2a] = 0x10;
+   dev->init_regs[0x150] = 0xff;
+-  dev->init_regs[0x151] = 0x13;
++  dev->init_regs[0x151] = (RTS_Debug->dev_model == HP3770) ? 0x03 : 0x13;	/* HP3770: as HP's driver */
+   dev->init_regs[0x156] = 0xf0;
+   dev->init_regs[0x157] = 0xfd;
+ 
+@@ -3715,6 +3892,23 @@
+   /* set time to switch off lamp */
+   dev->init_regs[0x147] = 0xff;
+ 
++  /* HP3770: lamp PWM frequency in the low nibble of 0xe946, as the 3770
++     driver programs it (PwmLampFrequencyFLB1200 of the t6 profile). hp3900
++     keeps the idle value 0 here. */
++  if (RTS_Debug->dev_model == HP3770)
++    {
++      SANE_Int freq = HP3770_PWM_FREQUENCY;
++      const char *env = getenv ("HP3770_PWM_FREQ");	/* diagnostics: 0..15 */
++
++      if (env != NULL)
++	{
++	  long v = strtol (env, NULL, 0);
++	  if ((v >= 0) && (v <= 15))
++	    freq = (SANE_Int) v;
++	}
++      data_bitset (&dev->init_regs[0x146], 0x0f, freq);
++    }
++
+   /* set last acccurve step */
+   data_lsb_set (&dev->init_regs[0xe1], 0x2af8, 3);
+ 
+@@ -3739,6 +3933,16 @@
+   dev->init_regs[0x0bd] = 0x00;
+ 
+   dev->init_regs[0x165] = (dev->init_regs[0x0165] & 0x3f) | 0x80;
++
++  /* HP3770: static values of HP's 3770 driver, identical in every
++     register image of its traces (hp3900 programs 0x13, 0x40, bit 7 set
++     and 0x80 here for the HP3970) */
++  if (RTS_Debug->dev_model == HP3770)
++    {
++      dev->init_regs[0x163] = (dev->init_regs[0x163] & 0x3f) | 0xc0;
++      data_bitset (&dev->init_regs[0x164], 0x80, 0);
++      dev->init_regs[0x165] = (dev->init_regs[0x165] & 0x3f) | 0xc0;
++    }
+   dev->init_regs[0x0ed] = 0x10;
+   dev->init_regs[0x0be] = 0x00;
+   dev->init_regs[0x0d5] = 0x00;
+@@ -3818,6 +4022,8 @@
+ 	{
+ 	  Regs[0x16f] = _B0 (data);
+ 	  rst = (data >> 6) & 1;
++	  if ((rst == 1) && (RTS_Debug->dev_model == HP3770))
++	    hp3770_head_pos = 0;
+ 	}
+     }
+ 
+@@ -3892,6 +4098,12 @@
+       data_bitset (&Regs[0x10], 0xe0, channels);	/*xxx----- */
+       data_bitset (&Regs[0x13], 0x80, channels >> 3);	/*x------- */
+ 
++      /* HP3770: keep CRVS from the profile; the chip's idle value (14)
++         differs from what HP's driver programs (12). Regs may be
++         dev->init_regs itself, which the read above has just refreshed. */
++      if ((RTS_Debug->dev_model == HP3770) && (hp3770_crvs >= 0))
++	data_bitset (&Regs[0x10], 0x1f, hp3770_crvs);
++
+       Write_Buffer (dev->usb_handle, 0xe810, &Regs[0x10], 4);
+       rst = OK;
+     }
+@@ -4621,6 +4833,47 @@
+ 			  usleep (1000 * 100);
+ 			  e800 |= 0x80;
+ 			  ret = Write_Byte (dev->usb_handle, 0xe800, e800);
++
++			  /* HP3770: track how far the head travels from home */
++			  if ((ret == OK) && (RTS_Debug->dev_model == HP3770)
++			      && ((hp3770_job_regs[0xd8] & 0x80) != 0))
++			    {
++			      if ((hp3770_job_regs[0xd9] & 0x80) == 0)
++				hp3770_head_pos = 0;	/* backward: park */
++			      else if (hp3770_head_pos >= 0)
++				{
++				  SANE_Int dummy = (hp3770_job_regs[0xd6] >> 4) & 0x0f;
++				  SANE_Int step = hp3770_job_regs[0xe0] + 1;
++				  SANE_Int end = data_lsb_get (&hp3770_job_regs[0xd2], 2);
++
++				  if (dummy < 1)
++				    dummy = 1;
++				  hp3770_head_pos += (end * step) / dummy;
++				}
++			      DBG (DBG_FNC, " -> HP3770 head position ~%i half-steps from home\n",
++				   hp3770_head_pos);
++
++			      /* forward scan job (not a head move): remember its
++			         line period for the lamp ripple correction in
++			         hp3770-scan; the image scan is the last one */
++			      if (((hp3770_job_regs[0xd9] & 0x80) != 0)
++				  && ((hp3770_job_regs[0x01] & 0x10) == 0))
++				{
++				  static const double mhz[16] = { 9, 12, 18, 24, 36, 72, 0, 0,
++				    12, 16, 24, 32, 48, 96, 0, 0 };
++				  double clk = mhz[hp3770_job_regs[0x00] & 0x0f] * 1e6;
++				  SANE_Int cnpp = (hp3770_job_regs[0x96] & 0x3f) + 1;
++				  SANE_Int dummy = (hp3770_job_regs[0xd6] >> 4) & 0x0f;
++
++				  if (dummy < 1)
++				    dummy = 1;
++				  hp3770_line_time = (clk > 0) ?
++				    (data_lsb_get (&hp3770_job_regs[0x30], 3) + 1.0) * cnpp * dummy / clk : 0.0;
++				  hp3770_line_res = scan2.resolution_y;
++				  DBG (DBG_FNC, " -> HP3770 line period %.3f ms at %i dpi\n",
++				       hp3770_line_time * 1000.0, hp3770_line_res);
++				}
++			    }
+ 			}
+ 		    }
+ 		}
+@@ -5419,7 +5672,29 @@
+   DBG (DBG_FNC, "> Lamp_SetGainMode(*Regs, resolution=%i, gainmode=%i):\n",
+        resolution, gainmode);
+ 
+-  if (dev->chipset->model == RTS8822L_02A)
++  if (RTS_Debug->dev_model == HP3770)
++    {
++      /* HP's 3770 driver (t6 CCD): bits 7-8 set and bits 4-5 by
++         resolution: 0x30 up to 100 dpi, 0x10 up to 300 dpi, 0 at 600
++         (e954/e955 = 09b0, 0990, 0980 in its traces). At 1200 dpi it
++         clears bits 7, 8 and 11 for the calibration and image passes alike
++         (e954/e955 = 0040). */
++      SANE_Int data = data_lsb_get (&Regs[0x154], 2) & ~0x01f0;
++
++      if (resolution >= 1200)
++	data &= ~0x0800;
++      else
++	data |= 0x0180;
++      if (resolution <= 100)
++	data |= 0x0030;
++      else if (resolution <= 300)
++	data |= 0x0010;
++      if (gainmode == FALSE)
++	data |= 0x0040;
++
++      data_lsb_set (&Regs[0x0154], data, 2);
++    }
++  else if (dev->chipset->model == RTS8822L_02A)
+     {
+       /* hp4370 */
+       SANE_Int data1, data2;
+@@ -6353,7 +6628,10 @@
+ 	      /* clear execution bit */
+ 	      data_bitset (&dev->init_regs[0x00], 0x80, 0);
+ 
+-	      Write_Byte (dev->usb_handle, 0x00, dev->init_regs[0x00]);
++	      /* HP3770: upstream writes this to address 0x0000, so the job was
++         never stopped; the execution bit lives in 0xe800 */
++      Write_Byte (dev->usb_handle, (RTS_Debug->dev_model == HP3770) ? 0xe800 : 0x00,
++		  dev->init_regs[0x00]);
+ 	      Head_ParkHome (dev, TRUE, dev->motorcfg->parkhomemotormove);
+ 	    }
+ 	}
+@@ -6364,7 +6642,10 @@
+       /* clear execution bit */
+       data_bitset (&dev->init_regs[0x00], 0x80, 0);
+ 
+-      Write_Byte (dev->usb_handle, 0x00, dev->init_regs[0x00]);
++      /* HP3770: upstream writes this to address 0x0000, so the job was
++         never stopped; the execution bit lives in 0xe800 */
++      Write_Byte (dev->usb_handle, (RTS_Debug->dev_model == HP3770) ? 0xe800 : 0x00,
++		  dev->init_regs[0x00]);
+       if (Head_IsAtHome (dev, dev->init_regs) == FALSE)
+ 	Head_ParkHome (dev, TRUE, dev->motorcfg->parkhomemotormove);
+     }
+@@ -8220,6 +8501,13 @@
+ 
+       hwdcfg.sensorevenodddistance = dev->sensorcfg->evenodd_distance;
+       hwdcfg.highresolution = (scancfg.resolution_x <= 1200) ? FALSE : TRUE;
++      /* HP3770: at the CCD's full 1200 dpi HP's driver programs the
++         even/odd pixel distance (e949/e94b/e94d = 4, 28, 52 in its trace):
++         the chip then realigns the staggered even and odd pixel rows. The
++         lines stay arranged by the chip (FIX_BY_HARD). */
++      if ((RTS_Debug->dev_model == HP3770)
++	  && (scancfg.resolution_x >= dev->sensorcfg->resolution))
++	hwdcfg.highresolution = TRUE;
+ 
+       /*5c55 */
+       /*
+@@ -8259,7 +8547,13 @@
+       if (dev->sensorcfg->type == CCD_SENSOR)
+ 	{
+ 	  /*5d3a */
+-	  scancfg.coord.left += 24;
++	  /* HP3770: the 24-pixel lead-in is a fixed ~2 mm on the scanner
++	     (diagnostic scans agree at 300 and 600 dpi); added as 24 pixels
++	     at 100 dpi it moved the image origin 4 mm to the right */
++	  if ((RTS_Debug->dev_model == HP3770) && (scancfg.resolution_x < 300))
++	    scancfg.coord.left += (24 * scancfg.resolution_x) / 300;
++	  else
++	    scancfg.coord.left += 24;
+ 	  switch (scancfg.resolution_x)
+ 	    {
+ 	    case 1200:
+@@ -8566,7 +8860,14 @@
+ 		mbs[0] = 0;
+ 
+ 	      if (mbs[1] >= (deccurvecount + acccurvecount))
+-		mbs[1] -= (deccurvecount + acccurvecount) + 2;
++		{
++		  /* HP3770: HP's driver adds 2 here, like for mbs[0] (its
++		     0xe8dc is 4 higher than hp3900's in every curve mode) */
++		  if (RTS_Debug->dev_model == HP3770)
++		    mbs[1] = mbs[1] - (deccurvecount + acccurvecount) + 2;
++		  else
++		    mbs[1] -= (deccurvecount + acccurvecount) + 2;
++		}
+ 	      else
+ 		mbs[1] = 0;
+ 	    }
+@@ -9165,7 +9466,8 @@
+ 	  /* dummy_scan? */
+ 	  data_bitset (&Regs[0x01], 0x10, hwdcfg->dummy_scan);		    /*---x----*/
+ 
+-	  data_bitset (&Regs[0x163], 0xc0, 1);	/*xx------ */
++	  /* HP3770: HP's driver keeps 3 here in every scan */
++	  data_bitset (&Regs[0x163], 0xc0, (RTS_Debug->dev_model == HP3770) ? 3 : 1);	/*xx------ */
+ 
+ 	  if (dev->scanning->arrange_compression != FALSE)
+ 	    {
+@@ -9259,12 +9561,30 @@
+     0xc0, 0x6d, 0xc0, 0x5f, 0xc0, 0x5f, 0xc0
+   };
+ 
++  SANE_Int calibrated_write = FALSE;
++
+   DBG (DBG_FNC, "> RTS_Setup_GainOffset(*Regs, *gain_offset)\n");
+   dbg_calibtable (gain_offset);
+ 
+   if ((Regs != NULL) && (gain_offset != NULL))
+     {
+-      if (RTS_Debug->calibrate == FALSE)
++      /* HP3770: without hardware calibration, program the 3770 profile's
++         fixed AFE values (offsets, VGA, PAG) instead of hp3900's HP3970
++         register block, which also cleared the reference-voltage bits. The
++         same values are used for the white-shading pass and the scan.
++         HP3770_AFE=hp3970 restores the old block (diagnostics). */
++      if ((RTS_Debug->dev_model == HP3770) && (RTS_Debug->calibrate == FALSE))
++	{
++	  const char *afe = getenv ("HP3770_AFE");
++
++	  if ((afe == NULL) || (strcmp (afe, "hp3970") != 0))
++	    {
++	      gain_offset = (struct st_gain_offset *) &hp3770_gain_offset;
++	      calibrated_write = TRUE;
++	    }
++	}
++
++      if ((RTS_Debug->calibrate == FALSE) && (calibrated_write == FALSE))
+ 	{
+ 	  data_bitset (&Regs[0x13], 0x03, gain_offset->pag[CL_RED]);		    /*------xx*/
+ 	  data_bitset (&Regs[0x13], 0x0c, gain_offset->pag[CL_GREEN]);		    /*----xx--*/
+@@ -10242,9 +10562,17 @@
+ 	  if (rst != OK)
+ 	    break;
+ 
++	  /* dSize counts 16-bit words, itransferred bytes. Upstream subtracted
++	     bytes from the word count, so any read above 0x1ffe0 words
++	     (262080 bytes) stopped after its first chunk: the white-shading
++	     pass of a wide scan (A4 at 300 dpi: 357120 bytes) got 73 % of its
++	     lines, the rest stayed zero and every shading gain came out 1.36x
++	     too high (HP3770 hardware, 2026-10-18). */
+ 	  iPos += itransferred;
+-	  dSize -= itransferred;
+-	  dtransferred += itransferred * 2;
++	  dSize -= itransferred / 2;
++	  dtransferred += itransferred;
++	  if (itransferred <= 0)
++	    break;
+ 	}
+       while (dSize > 0);
+     }
+@@ -10393,7 +10721,12 @@
+ 		  switch (scan.scantype)
+ 		    {
+ 		    case ST_NORMAL:
+-		      if (scan.resolution_x == 100)
++		      /* HP3770: not done. Copying the 100 dpi line period into a
++		         600 dpi calibration pass left 4 motor steps per 3000-clock
++		         line, a constant step rate of ~2700 pps without ramp:
++		         the head stalled during reference detection. HP's driver
++		         uses the pass's own line period (11999). */
++		      if ((scan.resolution_x == 100) && (RTS_Debug->dev_model != HP3770))
+ 			{
+ 			  SANE_Int iValue;
+ 			  SANE_Byte *myRegs;
+@@ -10643,6 +10976,25 @@
+   return rst;
+ }
+ 
++/* HP3770 safety net: the reference position (600 dpi units) decides where
++   the motor starts every scan. A value read from NVRAM with a valid checksum
++   but implausible contents, or a failed detection, must not be used:
++   re-detect (stored value) or abort the scan (detected value).
++   The window is generous: the marks sit a few millimetres from home. */
++static SANE_Int
++hp3770_refs_plausible (SANE_Int x, SANE_Int y, const char *what)
++{
++  if (RTS_Debug->dev_model != HP3770)
++    return TRUE;
++
++  if ((x >= 1) && (x <= 600) && (y >= 1) && (y <= 1200))
++    return TRUE;
++
++  DBG (DBG_ERR, "- hp3770: %s reference position x=%i y=%i (600 dpi) is out of "
++       "range, not using it\n", what, x, y);
++  return FALSE;
++}
++
+ static SANE_Int
+ Refs_Set (struct st_device *dev, SANE_Byte * Regs,
+ 	  struct st_scanparams *scancfg)
+@@ -10680,8 +11032,9 @@
+ 	{
+ 	case REF_AUTODETECT:
+ 	  /* try to autodetect references scanning a little area */
+-	  if (Refs_Detect
+-	      (dev, Regs, refcfg.resolution, refcfg.resolution, &x, &y) == OK)
++	  if ((Refs_Detect
++	       (dev, Regs, refcfg.resolution, refcfg.resolution, &x, &y) == OK)
++	      && (hp3770_refs_plausible (x, y, "detected") == TRUE))
+ 	    Refs_Save (dev, x, y);
+ 	  else
+ 	    rst = ERROR;
+@@ -10691,11 +11044,13 @@
+ 
+ 	case REF_TAKEFROMSCANNER:
+ 	  /* Try to get values from scanner */
+-	  if (Refs_Load (dev, &x, &y) == ERROR)
++	  if ((Refs_Load (dev, &x, &y) == ERROR)
++	      || (hp3770_refs_plausible (x, y, "stored") == FALSE))
+ 	    {
+-	      if (Refs_Detect
+-		  (dev, Regs, refcfg.resolution, refcfg.resolution, &x,
+-		   &y) == OK)
++	      if ((Refs_Detect
++		   (dev, Regs, refcfg.resolution, refcfg.resolution, &x,
++		    &y) == OK)
++		  && (hp3770_refs_plausible (x, y, "detected") == TRUE))
+ 		Refs_Save (dev, x, y);
+ 	      else
+ 		rst = ERROR;
+@@ -14005,7 +14360,7 @@
+ RTS_DebugInit ()
+ {
+   /* Default values */
+-  RTS_Debug->dev_model = HP3970;
++  RTS_Debug->dev_model = HP3770;
+ 
+   RTS_Debug->DumpShadingData = FALSE;
+   RTS_Debug->SaveCalibFile = FALSE;
+@@ -14025,6 +14380,10 @@
+ 
+   /* Calibration settings */
+   RTS_Debug->calibrate = FALSE;
++
++  /* HP3770: hp3900's hardware calibration path (calibrate = TRUE) is not
++     offered: under AddressSanitizer it overruns a stack buffer in
++     fn3330/Shading_black_apply. Fixed AFE values are used instead. */
+   RTS_Debug->wshading = TRUE;
+ }
+ 
+@@ -14462,7 +14821,7 @@
+   double sumatorio;
+   SANE_Int gainmode;
+   SANE_Int rst;
+-  SANE_Byte *avg_colors;
++  SANE_Byte *avg_colors = NULL;
+ 
+   DBG (DBG_FNC, "> WShading_Calibrate(*myCalib)\n");
+ 
+@@ -14589,6 +14948,28 @@
+ 	  DBG (DBG_FNC, " -> max colors RGB= %f %f %f\n", colors[0],
+ 	       colors[1], colors[2]);
+ 
++	  /* HP3770: hp3900 only flattens the white reference to its own
++	     brightest pixel, so white paper keeps the raw sensor level (about
++	     45 % of full scale on the 3770 with the profile's AFE values:
++	     images came out half as bright). Scale the reference to a fixed
++	     white level instead: HP3770_WHITE_LEVEL percent of full scale
++	     (default 92, accepted 50..100); gains are capped at 8. */
++	  if (RTS_Debug->dev_model == HP3770)
++	    {
++	      double level = 92.0, fullscale;
++	      const char *env = getenv ("HP3770_WHITE_LEVEL");
++
++	      if (env != NULL)
++		{
++		  double v = atof (env);
++		  if ((v >= 50.0) && (v <= 100.0))
++		    level = v;
++		}
++	      fullscale = (bytes_per_channel > 1) ? 65535.0 : 255.0;
++	      colors[0] = colors[1] = colors[2] = fullscale * level / 100.0;
++	      DBG (DBG_FNC, " -> HP3770 white level %.0f%% = %f\n", level, colors[0]);
++	    }
++
+ 	  chn = 0;
+ 	  for (x = 0; x < wshading->count; x++)
+ 	    {
+@@ -14596,6 +14977,10 @@
+ 		data_lsb_get (avg_colors + (x * bytes_per_channel),
+ 			      bytes_per_channel);
+ 	      prueba = data;
++	      if ((RTS_Debug->dev_model == HP3770) && (prueba < colors[chn] / 8.0))
++		prueba = colors[chn] / 8.0;
++	      if (prueba < 1.0)
++		prueba = 1.0;
+ 	      *(wshading->rates + x) = colors[chn] / prueba;
+ 	      chn++;
+ 	      if (chn > 2)
+@@ -14665,6 +15050,11 @@
+     }
+ 
+   free (pattern);
++  /* HP3770: these were leaked on every scan (upstream hp3900) */
++  free (avg_colors);
++  free (myRegs);
++  free (myscancfg);
++  free (calibcfg);
+ 
+   return OK;
+ }
+diff -u -r a/hp3770_sane.c b/hp3770_sane.c
+--- a/hp3770_sane.c	2026-10-19 01:06:31.668374260 +0200
++++ b/hp3770_sane.c	2026-10-19 01:06:31.672782718 +0200
+@@ -39,17 +39,17 @@
+ */
+ 
+ /* Backend Code for SANE*/
+-#define HP3900_CONFIG_FILE "hp3900.conf"
++#define HP3900_CONFIG_FILE "hp3770.conf"
+ #define GAMMA_DEFAULT 1.0
+ 
+-#include "../include/sane/config.h"
+-#include "../include/sane/sane.h"
+-#include "../include/sane/sanei.h"
+-#include "../include/sane/sanei_backend.h"
+-#include "../include/sane/sanei_config.h"
+-#include "../include/sane/saneopts.h"
+-#include "../include/sane/sanei_usb.h"
+-#include "../include/sane/sanei_debug.h"
++#include "sane/config.h"
++#include "sane/sane.h"
++#include "sane/sanei.h"
++#include "sane/sanei_backend.h"
++#include "sane/sanei_config.h"
++#include "sane/saneopts.h"
++#include "sane/sanei_usb.h"
++#include "sane/sanei_debug.h"
+ 
+ #include "hp3770_rts8822.c"
+ 
+@@ -60,6 +60,7 @@
+   SANE_Int threshold;
+   SANE_Int negative;
+   SANE_Int real_depth;
++  SANE_Int gray_from_color;	/* HP3770: gray/lineart scanned in colour */
+ };
+ 
+ /* options enumerator */
+@@ -290,6 +291,17 @@
+ 	  }
+ 	  break;
+ 
++	case HP3770:
++	  {
++	    /* t6 CCD, 1200 dpi optical; 50/75/150 are produced by resizing */
++	    SANE_Int myres[] = { 8, 50, 75, 100, 150, 200, 300, 600, 1200 };
++
++	    res = (SANE_Int *) malloc (sizeof (myres));
++	    if (res != NULL)
++	      memcpy (res, &myres, sizeof (myres));
++	  }
++	  break;
++
+ 	case HP4370:
+ 	case HPG3010:
+ 	case HPG3110:
+@@ -341,7 +353,7 @@
+ 
+       /* at this moment all devices use the same list */
+       SANE_String_Const mymodel[] =
+-	{ "HP3800", "HP3970", "HP4070", "HP4370", "UA4900", "HPG3010",
++	{ "HP3770", "HP3800", "HP3970", "HP4070", "HP4370", "UA4900", "HPG3010",
+ "BQ5550", "HPG2710", "HPG3110", 0 };
+ 
+       /* allocate space to save list */
+@@ -410,9 +422,13 @@
+     {
+       SANE_String_Const *source = NULL;
+ 
++      if (hp3770_hardware == TRUE)
++	model = HP3770;		/* real 3770: never offer TMA sources */
++
+       switch (model)
+ 	{
+ 	case UA4900:
++	case HP3770:		/* no transparency adapter */
+ 	  {
+ 	    SANE_String_Const mysource[] = { SANE_I18N ("Flatbed"), 0 };
+ 	    source = (SANE_String_Const *) malloc (sizeof (mysource));
+@@ -524,7 +540,7 @@
+   /* open usb device */
+   if (sanei_usb_open (name, &usbid) == SANE_STATUS_GOOD)
+     {
+-      SANE_Int vendor, product;
++      SANE_Int vendor = 0, product = 0;
+ 
+       if (sanei_usb_get_vendor_product (usbid, &vendor, &product) ==
+ 	  SANE_STATUS_GOOD)
+@@ -633,9 +649,9 @@
+   /* This function will set the device behaviour */
+ 
+   SANE_Int current = Device_get (product, vendor);
+-  char *sdevname[10] =
++  char *sdevname[DEVSCOUNT + 1] =
+     { "Unknown", "HP3970", "HP4070", "HP4370", "UA4900", "HP3800", "HPG3010",
+-"BQ5550", "HPG2710", "HPG3110" };
++"BQ5550", "HPG2710", "HPG3110", "HP3770" };
+ 
+   DBG (DBG_FNC,
+        "> set_ScannerModel(proposed=%i, product=%04x, vendor=%04x)\n",
+@@ -645,8 +661,8 @@
+     {
+       if ((current < 0) || (current >= DEVSCOUNT))
+ 	{
+-	  DBG (DBG_VRB, " -> Unknown device. Defaulting to HP3970...\n");
+-	  RTS_Debug->dev_model = HP3970;
++	  DBG (DBG_VRB, " -> Unknown device. Defaulting to HP3770...\n");
++	  RTS_Debug->dev_model = HP3770;
+ 	}
+       else
+ 	{
+@@ -673,9 +689,9 @@
+ 	    }
+ 	  else
+ 	    {
+-	      RTS_Debug->dev_model = HP3970;
++	      RTS_Debug->dev_model = HP3770;
+ 	      DBG (DBG_VRB,
+-		   "-> Device not supported. Defaulting to HP3970...\n");
++		   "-> Device not supported. Defaulting to HP3770...\n");
+ 	    }
+ 	}
+     }
+@@ -984,7 +1000,9 @@
+ {
+   SANE_Int rst;
+ 
+-  if (strcmp (model, "HP3800") == 0)
++  if (strcmp (model, "HP3770") == 0)
++    rst = HP3770;
++  else if (strcmp (model, "HP3800") == 0)
+     rst = HP3800;
+   else if (strcmp (model, "HPG2710") == 0)
+     rst = HPG2710;
+@@ -1003,7 +1021,7 @@
+   else if (strcmp (model, "BQ5550") == 0)
+     rst = BQ5550;
+   else
+-    rst = HP3970;		/* default */
++    rst = HP3770;		/* default */
+ 
+   return rst;
+ }
+@@ -1162,6 +1180,7 @@
+ 
+       /* color conversion */
+       scanner->cnv.colormode = -1;
++      scanner->cnv.gray_from_color = FALSE;
+       scanner->cnv.negative = FALSE;
+       scanner->cnv.threshold = 40;
+       scanner->cnv.real_depth = FALSE;
+@@ -1507,7 +1526,10 @@
+ 	      pDesc->cap =
+ 		SANE_CAP_ADVANCED | SANE_CAP_SOFT_DETECT |
+ 		SANE_CAP_SOFT_SELECT;
+-	      pVal->w = SANE_FALSE;
++	      /* HP3770: HP's driver never uses the chip's gray mode; its
++	         "monochrome" scans are colour scans converted by software
++	         ("true gray"), so do the same by default */
++	      pVal->w = (RTS_Debug->dev_model == HP3770) ? SANE_TRUE : SANE_FALSE;
+ 	      break;
+ 
+ 	    case opt_dbgimages:
+@@ -1704,6 +1726,10 @@
+       sModel.pszVendor = (char *) strdup ("Hewlett-Packard");
+       sModel.pszName = (char *) strdup ("Scanjet G2710");
+       break;
++    case HP3770:
++      sModel.pszVendor = (char *) strdup ("Hewlett-Packard");
++      sModel.pszName = (char *) strdup ("Scanjet 3770");
++      break;
+     case HP3970:
+       sModel.pszVendor = (char *) strdup ("Hewlett-Packard");
+       sModel.pszName = (char *) strdup ("Scanjet 3970");
+@@ -1786,6 +1812,7 @@
+ 	    }
+ 	}
+       fclose (conf_fp);
++      DBG (DBG_VRB, "- %s: %i lines read\n", HP3900_CONFIG_FILE, nline);
+     }
+   else
+     {
+@@ -1793,15 +1820,7 @@
+       DBG (DBG_VRB, "- %s not found. Looking for hardcoded usb ids ...\n",
+ 	   HP3900_CONFIG_FILE);
+ 
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x2605", attach_one_device);	/* HP3800  */
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x2805", attach_one_device);	/* HPG2710 */
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x2305", attach_one_device);	/* HP3970  */
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x2405", attach_one_device);	/* HP4070  */
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x4105", attach_one_device);	/* HP4370  */
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x4205", attach_one_device);	/* HPG3010 */
+-      sanei_usb_attach_matching_devices ("usb 0x03f0 0x4305", attach_one_device);	/* HPG3110 */
+-      sanei_usb_attach_matching_devices ("usb 0x06dc 0x0020", attach_one_device);	/* UA4900  */
+-      sanei_usb_attach_matching_devices ("usb 0x04a5 0x2211", attach_one_device);	/* BQ5550  */
++      sanei_usb_attach_matching_devices ("usb 0x03f0 0x2505", attach_one_device);	/* HP3770  */
+     }
+ 
+   /* Return backend version */
+@@ -1841,6 +1860,43 @@
+   return rst;
+ }
+ 
++/* HP3770: record status byte 0xf910 for --info (read-only). The original
++   3770 driver does not use it to pick its tables: FitCalibrate forces
++   CCDType=2, i.e. the 1200 dpi "t6" profile, on every unit. */
++static SANE_Int
++hp3770_check_ccd (struct st_device *dev)
++{
++  SANE_Byte status = 0;
++
++  if (RTS_Debug->dev_model != HP3770)
++    return OK;
++
++  if (Read_Byte (dev->usb_handle, 0xf910, &status) == OK)
++    hp3770_ccd_status = status;
++  else
++    DBG (DBG_ERR, "- hp3770: cannot read status byte 0xf910\n");
++
++  return OK;
++}
++
++/* Non-SANE helper for hp3770-scan: line period in seconds of the last image
++   scan and the vertical resolution the scanner used for it (0 if unknown). */
++double
++hp3770_backend_line_time (SANE_Int *hw_resolution)
++{
++  if (hw_resolution != NULL)
++    *hw_resolution = hp3770_line_res;
++  return hp3770_line_time;
++}
++
++/* Non-SANE helper for hp3770-scan --info: last value read from 0xf910,
++   or -1 if not read yet. */
++SANE_Int
++hp3770_backend_ccd_status (void)
++{
++  return hp3770_ccd_status;
++}
++
+ SANE_Status
+ sane_open (SANE_String_Const name, SANE_Handle * h)
+ {
+@@ -1848,14 +1904,20 @@
+   SANE_Status rst;
+ 
+   /* check the name */
+-  if (strlen (name) == 0)
+-    /* default to first available device */
+-    name = _pFirstSaneDev->dev.name;
++  if ((name == NULL) || (strlen (name) == 0))
++    {
++      /* default to first available device */
++      if (_pFirstSaneDev == NULL)
++	return SANE_STATUS_INVAL;
++      name = _pFirstSaneDev->dev.name;
++    }
+ 
+   /* allocate space for RTS environment */
+   device = RTS_Alloc ();
+   if (device != NULL)
+     {
++      device->usb_handle = -1;
++
+       /* Open device */
+       rst = sanei_usb_open (name, &device->usb_handle);
+       if (rst == SANE_STATUS_GOOD)
+@@ -1869,7 +1931,7 @@
+ 	      /* Initializing RTS */
+ 	      if (Init_Vars () == OK)
+ 		{
+-		  SANE_Int vendor, product;
++		  SANE_Int vendor = 0, product = 0;
+ 
+ 		  /* Setting device model */
+ 		  if (sanei_usb_get_vendor_product
+@@ -1877,12 +1939,18 @@
+ 		       &product) == SANE_STATUS_GOOD)
+ 		    s->model = Device_get (product, vendor);
+ 		  else
+-		    s->model = HP3970;
++		    s->model = HP3770;
+ 
+ 		  set_ScannerModel (s->model, product, vendor);
++		  hp3770_hardware = ((vendor == 0x03f0) && (product == 0x2505)) ? TRUE : FALSE;
+ 
+ 		  /* Initialize device */
+-		  if (RTS_Scanner_Init (device) == OK)
++		  if (hp3770_check_ccd (device) != OK)
++		    {
++		      free ((void *) s);
++		      rst = SANE_STATUS_UNSUPPORTED;
++		    }
++		  else if (RTS_Scanner_Init (device) == OK)
+ 		    {
+ 		      /* silencing unused functions */
+ 		      Silent_Compile ();
+@@ -1910,6 +1978,14 @@
+   else
+     rst = SANE_STATUS_NO_MEM;
+ 
++  if ((rst != SANE_STATUS_GOOD) && (device != NULL)
++      && (device->usb_handle != -1))
++    {
++      /* release the interface so another attempt can claim it */
++      sanei_usb_close (device->usb_handle);
++      device->usb_handle = -1;
++    }
++
+   DBG (DBG_FNC, "> sane_open(name=%s): %i\n", name, rst);
+ 
+   return rst;
+@@ -2330,12 +2406,21 @@
+ 	  colormode = Get_Colormode (s->aValues[opt_colormode].s);
+ 
+ 	  /* Emulating certain color modes */
++	  s->cnv.gray_from_color = FALSE;
+ 	  if (colormode == CM_LINEART)
+ 	    {
+ 	      /* emulate lineart */
+ 	      s->cnv.colormode = CM_LINEART;
+ 	      colormode = CM_GRAY;
+ 	      depth = 8;
++
++	      /* HP3770: lineart from a colour scan, like HP's driver */
++	      if ((RTS_Debug->dev_model == HP3770)
++		  && (s->aValues[opt_emulategray].w == SANE_TRUE))
++		{
++		  colormode = CM_COLOR;
++		  s->cnv.gray_from_color = TRUE;
++		}
+ 	    }
+ 	  else if ((colormode == CM_GRAY)
+ 		   && (s->aValues[opt_emulategray].w == SANE_TRUE))
+@@ -2343,6 +2428,7 @@
+ 	      /* emulate grayscale */
+ 	      s->cnv.colormode = CM_GRAY;
+ 	      colormode = CM_COLOR;
++	      s->cnv.gray_from_color = TRUE;
+ 	    }
+ 	  else
+ 	    s->cnv.colormode = -1;
+@@ -2480,7 +2566,7 @@
+ 	    emul_maxlen = maxlen;
+ 
+ 	  /* if grayscale emulation is enabled check that retrieved data is multiple of three */
+-	  if (s->cnv.colormode == CM_GRAY)
++	  if (s->cnv.gray_from_color == TRUE)
+ 	    {
+ 	      SANE_Int chn_size, rest;
+ 
+@@ -2493,7 +2579,8 @@
+ 
+ 	  /* this is important to keep lines alignment in lineart mode */
+ 	  if (s->cnv.colormode == CM_LINEART)
+-	    emul_maxlen = s->ScanParams.coords.width;
++	    emul_maxlen = s->ScanParams.coords.width
++	      * ((s->cnv.gray_from_color == TRUE) ? 3 : 1);
+ 
+ 	  /* if we are emulating depth, we scan at 16bit when frontend waits
+ 	     for 8bit data. Next buffer will be used to retrieve data from
+@@ -2597,7 +2684,7 @@
+ 		    Color_Negative (buffer, emul_len, s->ScanParams.depth);
+ 
+ 		  /* emulating grayscale ? */
+-		  if (s->cnv.colormode == CM_GRAY)
++		  if (s->cnv.gray_from_color == TRUE)
+ 		    {
+ 		      Color_to_Gray (buffer, emul_len, s->ScanParams.depth);
+ 		      emul_len /= 3;
+@@ -2708,6 +2795,8 @@
+       options_free (scanner);
+ 
+       img_buffers_free (scanner);
++
++      free (scanner);		/* HP3770: leaked by every sane_close */
+     }
+ }
+ 
+diff -u -r a/hp3770_types.c b/hp3770_types.c
+--- a/hp3770_types.c	2026-10-19 01:06:31.692655590 +0200
++++ b/hp3770_types.c	2026-10-19 01:06:31.694443323 +0200
+@@ -40,7 +40,7 @@
+ */
+ 
+ /* devices */
+-#define DEVSCOUNT           0x09	/* Number of scanners supported by this backend */
++#define DEVSCOUNT           0x0A	/* Number of scanners supported by this backend */
+ 
+ #define HP3970              0x00	/* rts8822l-01H  HP Scanjet 3970  */
+ #define HP4070              0x01	/* rts8822l-01H  HP Scanjet 4070  */
+@@ -51,6 +51,7 @@
+ #define BQ5550              0x06	/* rts8823l-01E  BenQ 5550        */
+ #define HPG2710             0x07	/* rts8822bl-03A HP Scanjet G2710 */
+ #define HPG3110             0x08	/* rts8822l-02A  HP Scanjet G3110 */
++#define HP3770              0x09	/* rts8822l-01H  HP Scanjet 3770 (hp3770 port) */
+ 
+ /* chipset models */
+ #define RTS8822L_01H        0x00
+diff -u -r a/hp3770_usb.c b/hp3770_usb.c
+--- a/hp3770_usb.c	2026-10-19 01:06:31.688563474 +0200
++++ b/hp3770_usb.c	2026-10-19 01:06:31.690273462 +0200
+@@ -216,9 +216,11 @@
+       *data = 0;
+       if (usb_ctl_read (usb_handle, address, buffer, 0x04, index) == 4)
+ 	{
+-	  SANE_Int C;
+-	  for (C = 3; C >= 0; C--)
+-	    *data = ((*data << 8) + (buffer[C] & 0xff)) & 0xffffffff;
++	  /* unsigned arithmetic: the 0xffffffff case must not overflow */
++	  *data = (SANE_Int) ((SANE_Word) ((unsigned) buffer[0]
++					 | ((unsigned) buffer[1] << 8)
++					 | ((unsigned) buffer[2] << 16)
++					 | ((unsigned) buffer[3] << 24)));
+ 	  ret = OK;
+ 	}
+     }
+@@ -354,41 +356,87 @@
+   return rst;
+ }
+ 
++/* HP3770 transport notes (from the original HP 3770 driver,
++   CChipDriver::USBVendorRequest / USBExecCommand):
++   - every vendor request uses bRequest = 0x00; the command code lives in the
++     high byte of wIndex (0x01 register read, 0x00 register write, 0x02 NVRAM,
++     0x04 DMA, 0x08 DMA reset), exactly the wIndex values hp3900 already uses.
++     hp3900 sends bRequest = 0x04 for the HP3970. HP3770_USB_REQUEST=0x04
++     reproduces that behaviour.
++   - register/NVRAM writes are split into 64-byte transfers at increasing
++     addresses. HP3770_USB_WRITE_CHUNK=0 disables the split. */
++
++#define HP3770_WRITE_CHUNK 0x40
++
++static SANE_Int
++usb_vendor_request (void)
++{
++  static SANE_Int request = -1;
++
++  if (request < 0)
++    {
++      const char *env = getenv ("HP3770_USB_REQUEST");
++      request = (env != NULL) ? (SANE_Int) (strtol (env, NULL, 0) & 0xff) : 0x00;
++      DBG (DBG_VRB, " -> USB vendor bRequest = 0x%02x\n", request);
++    }
++
++  return request;
++}
++
++static SANE_Int
++usb_write_chunk (void)
++{
++  static SANE_Int chunk = -1;
++
++  if (chunk < 0)
++    {
++      const char *env = getenv ("HP3770_USB_WRITE_CHUNK");
++      chunk = (env != NULL) ? (SANE_Int) strtol (env, NULL, 0) : HP3770_WRITE_CHUNK;
++      if (chunk < 0)
++	chunk = HP3770_WRITE_CHUNK;
++    }
++
++  return chunk;
++}
++
+ static SANE_Int
+ usb_ctl_write (USB_Handle usb_handle, SANE_Int address, SANE_Byte * buffer,
+ 	       SANE_Int size, SANE_Int index)
+ {
+   SANE_Int rst = ERROR;
++  SANE_Int request = usb_vendor_request ();
++  SANE_Int chunk = usb_write_chunk ();
++  SANE_Int done = 0;
+ 
+   dataline_count++;
+-  DBG (DBG_CTL, "%06i CTL DO: 40 04 %04x %04x %04x\n",
+-       dataline_count, address & 0xffff, index, size);
++  DBG (DBG_CTL, "%06i CTL DO: 40 %02x %04x %04x %04x\n",
++       dataline_count, request, address & 0xffff, index, size);
+   show_buffer (DBG_CTL, buffer, size);
+ 
+-#ifdef STANDALONE
+-  if (usb_handle != NULL)
+-    rst = usb_control_msg (usb_handle, 0x40,	/* Request type */
+-			   0x04,	/* Request      */
+-			   address,	/* Value        */
+-			   index,	/* Index        */
+-			   (char *) buffer,	/* Buffer       */
+-			   size,	/* Size         */
+-			   TIMEOUT);
+-#else
+-  if (usb_handle != -1)
++  if (usb_handle == -1)
++    return ERROR;
++
++  /* zero-length commands (e.g. chipset reset) are sent as they are */
++  if ((chunk == 0) || (size <= chunk))
++    chunk = size;
++
++  do
+     {
+-      if (sanei_usb_control_msg (usb_handle, 0x40,	/* Request type */
+-				 0x04,	/* Request      */
+-				 address,	/* Value        */
+-				 index,	/* Index        */
+-				 size,	/* Size         */
+-				 buffer)	/* Buffer       */
+-	  == SANE_STATUS_GOOD)
+-	rst = size;
+-      else
+-	rst = -1;
++      SANE_Int len = min (chunk, size - done);
++
++      if (sanei_usb_control_msg (usb_handle, 0x40, request,
++				 (address + done) & 0xffff, index, len,
++				 (buffer != NULL) ? buffer + done : NULL)
++	  != SANE_STATUS_GOOD)
++	{
++	  rst = -1;
++	  break;
++	}
++
++      done += len;
++      rst = done;
+     }
+-#endif
++  while (done < size);
+ 
+   if (rst < 0)
+     DBG (DBG_CTL, "             : Error, returned %i\n", rst);
+@@ -400,38 +448,21 @@
+ usb_ctl_read (USB_Handle usb_handle, SANE_Int address, SANE_Byte * buffer,
+ 	      SANE_Int size, SANE_Int index)
+ {
+-  SANE_Int rst;
+-
+-  rst = ERROR;
++  SANE_Int rst = ERROR;
++  SANE_Int request = usb_vendor_request ();
+ 
+   dataline_count++;
+-  DBG (DBG_CTL, "%06i CTL DI: c0 04 %04x %04x %04x\n",
+-       dataline_count, address & 0xffff, index, size);
++  DBG (DBG_CTL, "%06i CTL DI: c0 %02x %04x %04x %04x\n",
++       dataline_count, request, address & 0xffff, index, size);
+ 
+-#ifdef STANDALONE
+-  if (usb_handle != NULL)
+-    rst = usb_control_msg (usb_handle, 0xc0,	/* Request type */
+-			   0x04,	/* Request      */
+-			   address,	/* Value        */
+-			   index,	/* Index        */
+-			   (char *) buffer,	/* Buffer       */
+-			   size,	/* Size         */
+-			   TIMEOUT);
+-#else
+   if (usb_handle != -1)
+     {
+-      if (sanei_usb_control_msg (usb_handle, 0xc0,	/* Request type */
+-				 0x04,	/* Request      */
+-				 address,	/* Value        */
+-				 index,	/* Index        */
+-				 size,	/* Size         */
+-				 buffer)	/* Buffer       */
+-	  == SANE_STATUS_GOOD)
++      if (sanei_usb_control_msg (usb_handle, 0xc0, request, address & 0xffff,
++				 index, size, buffer) == SANE_STATUS_GOOD)
+ 	rst = size;
+       else
+ 	rst = -1;
+     }
+-#endif
+ 
+   if (rst < 0)
+     DBG (DBG_CTL, "             : Error, returned %i\n", rst);

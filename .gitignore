@@ -1,0 +1,28 @@
+# build output
+/build/
+/hp3770-scan
+/hp3770-airscan
+/hp3770-probe
+*.dSYM/
+*.o
+__pycache__/
+
+# scans, traces and diagnostics written while testing
+*.tif
+*.tiff
+*.pnm
+*.ppm
+*.pgm
+*.pbm
+*.jpg
+*.pdf
+*.log
+*.trace
+diag-*/
+lamp-*/
+nvram*.bin
+
+# HP's original driver, if you keep a copy here for "make tables"
+/hp3770-legacy/
+
+.DS_Store
